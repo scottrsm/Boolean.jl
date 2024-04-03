@@ -536,23 +536,6 @@ end
 
 
 """
-	fixXorParseTree(e::Union{Int64, Symbol, Expr}[, cnt=1; verbose=false])
-
-Simplify a logical expression.
-
-This function calls a number of specialized variations of this function 
-to deal with different expression types.
-
-# Arguments
-- `e :: Any` -- Logic parse tree (as returned by Meta.parse).
-
-# Return
-A modified parse tree.
-
-"""
-
-
-"""
 	fixXorParseTree(s::Int64[, cnt=1; verbose=false])
 
 fixXorParseTree specialized to `Int64`.
