@@ -535,11 +535,6 @@ function parseLogic(expr::String)
 end
 
 
-"""
-	fixXorParseTree(s::Int64[, cnt=1; verbose=false])
-
-fixXorParseTree specialized to `Int64`.
-"""
 function fixXorParseTree(s::Int64, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
@@ -547,11 +542,6 @@ function fixXorParseTree(s::Int64, cnt=1; verbose=false)
 end
 
 
-"""
-	fixXorParseTree(s::Symbol[, cnt=1; verbose=false])
-
-fixXorParseTree specialized to `Symbol`.
-"""
 function fixXorParseTree(s::Symbol, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
@@ -559,11 +549,6 @@ function fixXorParseTree(s::Symbol, cnt=1; verbose=false)
 end
 
 
-"""
-	fixXorParseTree(s::Expr[, cnt=1; verbose=false])
-
-fixXorParseTree specialized to `Expr`.
-"""
 function fixXorParseTree(e::Expr, cnt=1; verbose=false)
     N = length(e.args)
     delim = join(fill("  ", cnt))
