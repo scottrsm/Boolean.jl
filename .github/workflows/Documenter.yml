@@ -4,7 +4,7 @@ on:
     branches:
       - main
     tags: '*'
-  pull_-request:
+  pull_request:
 jobs:
   build:
     runs-on: ubuntu-latest
