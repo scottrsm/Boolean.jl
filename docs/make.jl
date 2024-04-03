@@ -1,5 +1,8 @@
-using Documenter
 using Boolean
+import Pkg
+
+Pkg.add("Documenter")
+using Documenter
 
 makedocs(
 	sitename = "Boolean",
