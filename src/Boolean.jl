@@ -185,13 +185,6 @@ function create_bool_rep(s::String, simplify=false)
     Blogic(s, String(ar[1]), val)
 end
 
-"""
-	create_boolean_expr_tree(s::String[; simplify::Bool=false])
-
-Transform a formula string, `s`, into a parsed expression tree
-of boolean operators (in broadcase form) with variables replaced
-by BitVectors representing the "truth table".
-"""
 function create_boolean_expr_tree(s::String; simplify::Bool=false)
 	ns = parseLogic(s)
     if simplify
