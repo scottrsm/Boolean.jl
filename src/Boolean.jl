@@ -39,7 +39,7 @@ or use the macro @bfunc the inner constructor.
 # Fields
 - `formula :: String`    -- The string representation of the formula.
 - `var     :: String`    -- The base name of the logical variables.
-- `size    :: Int64`     -- The number of variables in the formula.
+- `size    :: Int`     -- The number of variables in the formula.
 - `val     :: BitVector` -- The bit vector representing the formula. 
                             It essentially expresses the values of all possible inputs.  
 # Constructors
@@ -61,28 +61,28 @@ This is the logic (boolean) formula that ORs `z1` and `z2`,
 struct Blogic
     formula::String
     var    ::String
-    size   ::Int64
+    size   ::Int
     val    ::BitVector
 
 	# Inner Constructor
     Blogic(form::String, v::String, value::BitVector) = 
-	new(form, v, Int64(log2(length(value))), value)
+	new(form, v, Int(log2(length(value))), value)
 end
 
 
 """
-	(Blogic)(xs::Vararg{Int64})
+	(Blogic)(xs::Vararg{Int})
 
 Uses the structure `Blogic` as a `Boolean` function. 
 
 # Arguments
-- `xm :: Vararg{Int64}`  -- A Varargs structure representing inputs to the
+- `xm :: Vararg{Int}`  -- A Varargs structure representing inputs to the
                            `Blogic` function, `f`.
 
 # Return
 `::Bool`
 """
-function (f::Blogic)(xs::Vararg{Int64}) 
+function (f::Blogic)(xs::Vararg{Int}) 
 	global logic_size
 
 	if length(xs) != logic_size
@@ -99,18 +99,18 @@ end
 
 
 """
-	(Blogic)(xm::Matrix{Int64})
+	(Blogic)(xm::Matrix{Int})
 
 Uses the structure `Blogic` as a `Boolean` function. 
 
 # Arguments
-- `xm :: Matrix{Int64}`  -- A matrix of size `M`, `N` representing `M` sets of inputs
+- `xm :: Matrix{Int}`  -- A matrix of size `M`, `N` representing `M` sets of inputs
                             to the function, `f`, which takes `N` variables.
 
 # Return
 `::BitVector` of length `M`.
 """
-function (f::Blogic)(xm::Matrix{Int64}) 
+function (f::Blogic)(xm::Matrix{Int}) 
 	global logic_size
 
 	M, N = size(xm)
@@ -118,7 +118,7 @@ function (f::Blogic)(xm::Matrix{Int64})
 		raise(DomainError("Blogic function: Input `xm` has the wrong number of variables."))
 	end
 
-	s = zeros(Int64, M)
+	s = zeros(Int, M)
 	p = 1
 
 	for i in 1:N 
@@ -222,7 +222,7 @@ Bit vector = Bool[0, 0, 0, 0, 0, 1, 1, 1]
 """
 macro bfunc(x)
 	sform = string(x)
-    num_vars = maximum([parse(Int64, x) for x in split(sform, r"[ *+~()⊕a-z]+") if x != ""])
+    num_vars = maximum([parse(Int, x) for x in split(sform, r"[ *+~()⊕a-z]+") if x != ""])
     
 	# Check that the variables used have the same name:
     # Looking for x1, x2, x3. Not x1, y2, z3.
@@ -322,7 +322,7 @@ function Base.show(io::IO, z::BitMatrix)
         println("N/A")
     else
         for i in 1:n
-            println(io, Tuple(map(x -> Int64(x), z[i, :])))
+            println(io, Tuple(map(x -> Int(x), z[i, :])))
         end
     end
 end
@@ -331,20 +331,20 @@ end
 # Define how to order Int, Symbols, and Expr.
 # Needed for `simplifyLogic`.
 """
-	Base.isless(i1::Int64, s2::Symbol)
+	Base.isless(i1::Int, s2::Symbol)
 
-Compare an `Int64` with a `Symbol`.
+Compare an `Int` with a `Symbol`.
 """
-Base.isless(x::Int64 , y::Symbol) = true
-Base.isless(x::Symbol, y::Int64 ) = false
+Base.isless(x::Int , y::Symbol) = true
+Base.isless(x::Symbol, y::Int ) = false
 
 """
-	Base.isless(i1::Int64, e2::Expr)
+	Base.isless(i1::Int, e2::Expr)
 
-Compare an `Int64` with an `Expr`.
+Compare an `Int` with an `Expr`.
 """
-Base.isless(x::Int64 , y::Expr  ) = true
-Base.isless(x::Expr  , y::Int64 ) = false
+Base.isless(x::Int , y::Expr  ) = true
+Base.isless(x::Expr  , y::Int ) = false
 
 """
 	Base.isless(s1::Symbol, e2::Expr)
@@ -417,7 +417,7 @@ Get up to `head` inputs that generate true values for a logic function, `f`.
 - `f :: Blogic` -- A logic formula.
 
 # Optional Arguments
-- `head=1 :: Int64`  -- The maximum number of inputs to consider.
+- `head=1 :: Int`  -- The maximum number of inputs to consider.
     
 # Return
 A list of up to `head` input values that will give the 
@@ -438,15 +438,15 @@ yield a value of `true`.
 
 # Arguments
 - `v   :: BitVector` -- A bit vector representing `true` and `false` values.
-- `n   :: Int64`     -- Describes the length of the truth table column: ``2^n``.
+- `n   :: Int`     -- Describes the length of the truth table column: ``2^n``.
 
 # Optional Arguments
-- `num :: Int64`     -- The desired number of inputs that generate truth values.
+- `num :: Int`     -- The desired number of inputs that generate truth values.
 
 # Returns
 `::Union{BitMatrix, Nothing}` -- Input values that generate truth values for the current function.
 """
-function get_non_zero_inputs(v::BitVector, n::Int64; num::Int64=1)
+function get_non_zero_inputs(v::BitVector, n::Int; num::Int=1)
     idx = collect(1:2^n)[v]
 	length(idx) == 0 && return(nothing)
   	return(vars[idx[1:num], :])
@@ -490,7 +490,7 @@ This sets two global variables, the size of the boolean vectors and
 the other the `Bitarray` representations of the variables.
 
 # Arguments
-- `n :: Int64` -- The number of boolean variables used in the formulas
+- `n :: Int` -- The number of boolean variables used in the formulas
 this module will consider.
 
 # Return
@@ -528,7 +528,7 @@ function parseLogic(expr::String)
 end
 
 
-function fixXorParseTree(s::Int64, cnt=1; verbose=false)
+function fixXorParseTree(s::Int, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
     return(s)
@@ -574,7 +574,7 @@ The values are **assumed** to be sorted.
 - `xs :: Vector{T}` -- An array that is sortable.
 
 # Return
-`::Vector{Tuple{T, Int64}}` -- A Vector of pairs of the form: `(T, Int64)`
+`::Vector{Tuple{T, Int}}` -- A Vector of pairs of the form: `(T, Int)`
 representing values from `xs` and the number of their occurrences.
 
 """
@@ -652,7 +652,7 @@ function modifyLogicExpr!(e::Symbol)
     
     # If this is a variable get the corresponding `BitVector`.
     if match(r"[a-zA-Z]+", String(e)) !== nothing
-        vn = parse(Int64, (split(String(e), r"[a-zA-Z]+"))[2])
+        vn = parse(Int, (split(String(e), r"[a-zA-Z]+"))[2])
         return(vars[:, vn])
     end
 
@@ -663,7 +663,7 @@ end
 
 
 """
-    redux(::Op{T}, Tuple{S, Int64})
+    redux(::Op{T}, Tuple{S, Int})
 
 Reduce a pair consisting of an expression and its count to just 
 an expression. 
@@ -672,18 +672,18 @@ The default case is to just return the expression.
 
 # Arguments
 - `::Op{T}`                    -- An operator type.
-- `pair :: Tuple{Expr, Int64}` -- Expression and its count.
+- `pair :: Tuple{Expr, Int}` -- Expression and its count.
 
 # Return
 `::Expr` -- Simplified logic expression.
 """
-function redux(::Op{T}, pair::Tuple{S, Int64}) where {S, T}
+function redux(::Op{T}, pair::Tuple{S, Int}) where {S, T}
     return(pair[1])
 end
 
 
 """
-    redux(::Opt{:⊕}, pair::Tuple{Expr, Int64})
+    redux(::Opt{:⊕}, pair::Tuple{Expr, Int})
 
 Reduce a pair consisting of an expression and its count to just 
 an expression. 
@@ -693,12 +693,12 @@ remains or the value is 0.
 
 # Arguments
 - `:::Opt{:⊕}`                 -- An operator type.
-- `pair :: Tuple{Expr, Int64}` -- Expression and its count.
+- `pair :: Tuple{Expr, Int}` -- Expression and its count.
 
 # Return
 `::Expr` -- Simplified logic expression.
 """
-function redux(::Op{:⊕}, pair::Tuple{S, Int64}) where S
+function redux(::Op{:⊕}, pair::Tuple{S, Int}) where S
     if pair[2] % 2 == 0
         return(0)
     else
@@ -732,7 +732,7 @@ function simplifyLogic(e::Expr)
 			return(simplifyLogic(e.args[2].args[2]))
 		end
         arg = simplifyLogic(e.args[2])
-        if typeof(arg) == Int64
+        if typeof(arg) == Int
             return((1 + arg) % 2)
         else
             return(Expr(:call, :~, arg))
@@ -822,8 +822,8 @@ function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
     xargs = map(arg -> simplifyLogic(arg), xargs)
 	xargs = map(x -> redux(Op{:⊕}(), x), rle(sort(xargs)))
     
-    iargs = filter(arg -> typeof(arg) == Int64, xargs)
-    xargs = filter(arg -> typeof(arg) != Int64, xargs)
+    iargs = filter(arg -> typeof(arg) == Int, xargs)
+    xargs = filter(arg -> typeof(arg) != Int, xargs)
     # If there are no simple booleans (0 or 1s), return the xor expression 
     #      with the xargs.
     if length(iargs) == 0
@@ -865,11 +865,11 @@ function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
 end
 
 """
-    simplifyLogic(e::Union{Int64, Symbol})
+    simplifyLogic(e::Union{Int, Symbol})
 
 `simplifyLogic` for the irreducible cases: A number or a symbol.
 """
-function simplifyLogic(e::Union{Int64, Symbol})
+function simplifyLogic(e::Union{Int, Symbol})
     return e
 end
 

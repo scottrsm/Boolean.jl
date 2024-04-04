@@ -40,11 +40,11 @@ create_bool_rep
 ```
 
 ```@docs
-(Blogic)(::Vararg{Int64})
+(Blogic)(::Vararg{Int})
 ```
 
 ```@docs
-(Blogic)(::Matrix{Int64})
+(Blogic)(::Matrix{Int})
 ```
 
 ```@docs
@@ -67,11 +67,11 @@ Base.show(::IO, ::BitMatrix)
 ```
 
 ```@docs
-Base.isless(::Int64, ::Symbol)
+Base.isless(::Int, ::Symbol)
 ```
 
 ```@docs
-Base.isless(::Int64, ::Expr)
+Base.isless(::Int, ::Expr)
 ```
 
 ```@docs
