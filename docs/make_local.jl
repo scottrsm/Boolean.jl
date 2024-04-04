@@ -1,4 +1,4 @@
-using Documenter, Cluster
+using Documenter, Boolean
 
 makedocs(sitename="Boolean")
 

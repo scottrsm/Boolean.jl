@@ -468,13 +468,13 @@ of each of the variables collectively as a `BitArray`.
 # Return
 `::BitArray` -- The bit representation of all of the logical variables.
 """
-function bool_var_rep(n::Int64)
+function bool_var_rep(n::Signed)
     if n > 30
         error("Can't represent more than 30 variables.")
     elseif n < 2
         error("Can't represent less than 2 variables.")
     else
-        let nn::UInt64 = UInt64(n)
+        let nn = Unsigned(n)
             # `BitArray([div(i-1, 2^(j-1)) % 2 != 0  for i in 1:2^n, j in 1:n])`
             # This is a bit matrix of shape (2^n, n), where column 1 
             # represents `x1`, column 2 represents `x2`, etc.
@@ -497,7 +497,7 @@ this module will consider.
 Nothing
 
 """
-function init_logic(n::Int64)
+function init_logic(n::Signed)
     global vars = bool_var_rep(n)
     global logic_size = n
 end
