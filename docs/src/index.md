@@ -31,6 +31,14 @@ Blogic
 ## Alternative `Blogic` Constructor
 
 ```@docs
+Blogic(s::String; simplify::Bool=false)
+```
+
+```@docs
+Blogic_from_file(f::String; simplify::Bool=false)
+```
+
+```@docs
 create_bool_rep
 ```
 
