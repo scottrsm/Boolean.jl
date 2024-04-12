@@ -36,6 +36,6 @@ jobs:
             BOOLEAN_DATA_DIR: "${{ github.workspace }}/data"
       - uses: julia-actions/cache@v1
       - uses: julia-actions/julia-buildpkg@v1
-        run: julia --project=@. ${{ github.workspace }}/test/runtests.jl
+      - uses: julia --project=@. ${{ github.workspace }}/test/runtests.jl
         env:
           BOOLEAN_DATA_DIR: ${{ github.workspace }}/data/
