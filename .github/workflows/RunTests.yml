@@ -1,6 +1,4 @@
 name: RunTests
-env: 
-  BOOLEAN_DATA_DIR : "$GITHUB_WORKSPACE/data"
 
 on:
   push:
@@ -32,6 +30,8 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
           arch: ${{ matrix.julia-arch }}
+          env: 
+            BOOLEAN_DATA_DIR : "$GITHUB_WORKSPACE/data"
       - name: Setup environment variables
       - uses: julia-actions/cache@v1
       - uses: julia-actions/julia-buildpkg@v1
