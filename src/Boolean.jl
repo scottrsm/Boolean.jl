@@ -88,8 +88,8 @@ Outer constructor for Blogic.
 """
 function Blogic(s::String; simplify::Bool=false)
 
-	s = replace(s, '\n' => ' ')
-	value = eval(create_boolean_expr_tree(s; simplify=simplify))
+    s = replace(s, '\n' => ' ')
+    value = eval(create_boolean_expr_tree(s; simplify=simplify))
 
     # Check that the variables used have the same name:
     # Looking for x1, x2, x3. Not x1, y2, z3.
@@ -106,7 +106,7 @@ function Blogic(s::String; simplify::Bool=false)
             map(x -> String(x), ar))
     end
 
-	return(Blogic(s, String(ar[1]), value))
+    return (Blogic(s, String(ar[1]), value))
 end
 
 
@@ -123,17 +123,17 @@ Outer constructor for Blogic.
 """
 function Blogic_from_file(f::String; simplify::Bool=false)
 
-	fh = nothing
-	try
-		fh = open(f)
-	catch
-		throw(DomainError(0, "Blogic: Unable to open file, \"$f\""))
-	end
+    fh = nothing
+    try
+        fh = open(f)
+    catch
+        throw(DomainError(0, "Blogic: Unable to open file, \"$f\""))
+    end
 
-	s = read(fh, String)
-	close(fh)
+    s = read(fh, String)
+    close(fh)
 
-	return(Blogic(s; simplify=simplify))
+    return (Blogic(s; simplify=simplify))
 end
 
 
@@ -724,9 +724,9 @@ end
 
 
 # The intent of this function is to replace the logic equivalence operator, ⟺ ,
-# with its equivalent in terms of the implication 
-# operator, ⟹ : (x1 ⟺  x2) == (x1 ⟹  x2) * (x2 ⟹  x1)  .
+# with its equivalent in terms of more basic logical operators.
 # Again, the function is overloaded for three types: Int, Symbol, and Expr.
+# At the leaves of the tree: constants and symbols, we return them unchanged.
 function fixIffParseTree(s::Int, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
@@ -741,6 +741,9 @@ function fixIffParseTree(s::Symbol, cnt=1; verbose=false)
 end
 
 
+# For any expression where the operator is used, we 
+# repace ot in terms of xor and not:
+# x1 ⟺  x2 is the same as: ~x1 ⊕ x2.
 function fixIffParseTree(e::Expr, cnt=1; verbose=false)
     N = length(e.args)
     delim = join(fill("  ", cnt))
@@ -749,7 +752,7 @@ function fixIffParseTree(e::Expr, cnt=1; verbose=false)
     if e.args[1] == :⟺
         nargs2 = fixIffParseTree(e.args[2], cnt + 1; verbose=verbose)
         nargs3 = fixIffParseTree(e.args[3], cnt + 1; verbose=verbose)
-        exp = Expr(:call, :*, Expr(:call, :⟹, nargs2, nargs3), Expr(:call, :⟹, nargs3, nargs2))
+        exp = Expr(:call, :⊕, Expr(:call, :~, nargs2), nargs3)
         return (exp)
     end
     return (Expr(:call, e.args[1], map(x -> fixIffParseTree(x, cnt + 1; verbose=verbose), e.args[2:end])...))
