@@ -83,6 +83,9 @@ Outer constructor for Blogic.
 # Arguments
 - `s :: String`  -- A logic formula string.
 
+# Optional Arguments
+- `simplify=false::Bool` - Bool argument, if `true`, logic should be simplified.
+
 # Return
 `::Blogic`
 """
