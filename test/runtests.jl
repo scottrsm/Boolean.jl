@@ -2,11 +2,11 @@ using Test
 using Boolean
 
 
-@testset "Boolean (Fidelity)" begin
+@testset "Boolean (Fidelity)              " begin
     @test length(detect_ambiguities(Boolean)) == 0
 end
 
-@testset "Boolean (Formulas)" begin
+@testset "Boolean (Formulas)              " begin
 
     # Use env var for Boolean data.
     # At the github repo, we set this env variable. See .github/workflows/RunTest.jl.
