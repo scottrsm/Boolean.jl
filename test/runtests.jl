@@ -8,9 +8,7 @@ end
 
 @testset "Boolean (Formulas)              " begin
 
-    # Use env var for Boolean data.
-    # At the github repo, we set this env variable. See .github/workflows/RunTest.jl.
-    #REPO_DATA_DIR = ENV["BOOLEAN_DATA_DIR"]
+	# Package data directory.
 	REPO_DATA_DIR = joinpath(dirname(pathof(Boolean)), "../data")
 
     # Set up
