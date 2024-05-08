@@ -10,7 +10,8 @@ end
 
     # Use env var for Boolean data.
     # At the github repo, we set this env variable. See .github/workflows/RunTest.jl.
-    REPO_DATA_DIR = ENV["BOOLEAN_DATA_DIR"]
+    #REPO_DATA_DIR = ENV["BOOLEAN_DATA_DIR"]
+	REPO_DATA_DIR = joinpath(dirname(pathof(Boolean)), "../data")
 
     # Set up
     init_logic(3)
@@ -45,7 +46,7 @@ end
     @test f.val == Bool[0, 0, 0, 0, 0, 1, 1, 1]
 
     # Test Blogic creation from file.
-    f = Blogic_from_file("$REPO_DATA_DIR/example1.txt")
+	f = Blogic_from_file(joinpath(REPO_DATA_DIR, "example1.txt"))
     @test f.val == Bool[0, 1, 1, 1, 1, 1, 1, 1]
 
 end

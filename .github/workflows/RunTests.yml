@@ -34,5 +34,3 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - name: Run Tests
         run: julia --project=@. ${{ github.workspace }}/test/runtests.jl
-        env:
-          BOOLEAN_DATA_DIR: ${{ github.workspace }}/data/
