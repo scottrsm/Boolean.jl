@@ -1,5 +1,5 @@
-using Test
 using Boolean
+using Test
 
 
 @testset "Boolean (Fidelity)              " begin
@@ -9,7 +9,7 @@ end
 @testset "Boolean (Formulas)              " begin
 
 	# Package data directory.
-	REPO_DATA_DIR = joinpath(dirname(pathof(Boolean)), "../data")
+	REPO_DATA_DIR = joinpath(@__DIR__, "../data")
 
     # Set up
     init_logic(3)
