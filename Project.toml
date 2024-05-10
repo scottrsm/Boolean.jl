@@ -1,7 +1,7 @@
 name = "Boolean"
 uuid = "d4def8ba-741e-4784-adc0-3f6248bfb1a9"
-authors = ["Scott McIntire <scottrsm@gmail.com>"]
-version = "1.1.5"
+authors = ["Roland Scott McIntire"]
+version = "1.1.6"
 
 [compat]
 julia = "1.10"
