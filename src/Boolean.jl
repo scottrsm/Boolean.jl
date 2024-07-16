@@ -94,9 +94,10 @@ function Blogic(s::String; simplify::Bool=false)
     s = replace(s, '\n' => ' ')
     value = eval(create_boolean_expr_tree(s; simplify=simplify))
 
-    # Check that the variables used have the same name:
-    # Looking for x1, x2, x3. Not x1, y2, z3.
-    # Get the array of unique variables names.
+    #= Check that the variables used have the same name:
+       Looking for x1, x2, x3. Not x1, y2, z3.
+       Get the array of unique variables names.
+	=#
     ar = []
     for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
         push!(ar, split(m.match, r"[0-9]+")[1])
@@ -232,9 +233,10 @@ Bit vector = Bool[0, 0, 0, 0, 0, 1, 1, 1]
 function create_bool_rep(s::String, simplify=false)
     global logic_size
 
-    # Check that the variables used have the same name:
-    # Looking for x1, x2, x3. Not x1, y2, z3.
-    # Get the array of unique variables names.
+    #= Check that the variables used have the same name:
+       Looking for x1, x2, x3. Not x1, y2, z3.
+       Get the array of unique variables names.
+	=#
     ar = []
     for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
         push!(ar, split(m.match, r"[0-9]+")[1])
@@ -315,9 +317,10 @@ macro bfunc(x)
     sform = replace(sform, [r"^ *" => "", r" *$" => "", r" +" => "  "]...)
     num_vars = maximum([parse(Int, x) for x in split(sform, r"[ *+~⟺ ()⊕⟹ a-z]+") if x != ""])
 
-    # Check that the variables used have the same name:
-    # Looking for x1, x2, x3. Not x1, y2, z3.
-    # Get the array of unique variables names.
+    #= Check that the variables used have the same name:
+       Looking for x1, x2, x3. Not x1, y2, z3.
+       Get the array of unique variables names.
+	=#
     ar = []
     for m in eachmatch(r"[a-zA-Z]+([0-9]+)", sform)
         push!(ar, split(m.match, r"[0-9]+")[1])
@@ -334,9 +337,10 @@ macro bfunc(x)
     init_logic(num_vars)
 
 
-    # Create the call to Blogic inner constructor which will take the string form
-    # of the formula, the variable base name, and the expression tree
-    # which will be evaluated to a bit-vector -- our representation of the function.
+    #= Create the call to Blogic inner constructor which will take the string form
+       of the formula, the variable base name, and the expression tree
+       which will be evaluated to a bit-vector -- our representation of the function.
+	=#
     Expr(:call, :Blogic, sform, String(ar[1]), create_boolean_expr_tree(sform))
 end
 
@@ -383,9 +387,10 @@ end
 
 
 
-#-------------------------------------------------------------------
-#----------  Overload Base functions: show, isless, ==    ----------
-#-------------------------------------------------------------------
+#=-----------------------------------------------------------------
+----------  Overload Base functions: show, isless, ==    ----------
+-------------------------------------------------------------------
+=#
 
 """
     Show the Blogic structure.
@@ -477,9 +482,10 @@ function Base.:(==)(b1::Blogic, b2::Blogic)
 end
 
 
-#-------------------------------------------------------------------
-#----------  Utility Functions   -----------------------------------
-#-------------------------------------------------------------------
+#=-----------------------------------------------------------------
+----------  Utility Functions   -----------------------------------
+-------------------------------------------------------------------
+=#
 
 """
     logicCount(f)
@@ -563,9 +569,10 @@ function bool_var_rep(n::Signed)
         error("Can't represent less than 2 variables.")
     else
         let nn = Unsigned(n)
-            # `BitArray([div(i-1, 2^(j-1)) % 2 != 0  for i in 1:2^n, j in 1:n])`
-            # This is a bit matrix of shape (2^n, n), where column 1 
-            # represents `x1`, column 2 represents `x2`, etc.
+            #= `BitArray([div(i-1, 2^(j-1)) % 2 != 0  for i in 1:2^n, j in 1:n])`
+               This is a bit matrix of shape (2^n, n), where column 1 
+               represents `x1`, column 2 represents `x2`, etc.
+			=#
             BitArray([((i - 1) >> (j - 1)) & 1 for i in 1:2^nn, j in 1:nn])
         end
     end
@@ -629,10 +636,11 @@ function parseLogic(expr::String)
     return (fixXorParseTree(e2))
 end
 
-# Given a vector of expressions create that interleaves an expression with
-# a logic operator -- one of: +, *, xor, not, implies, is-equivalent,
-# create an new expression that is the "left associative" parse of this.
-# That is, treat all operators as left associative with equal precedence.
+#= Given a vector of expressions create that interleaves an expression with
+   a logic operator -- one of: +, *, xor, not, implies, is-equivalent,
+   create an new expression that is the "left associative" parse of this.
+   That is, treat all operators as left associative with equal precedence.
+=#
 function process_multiline_logic(ex::Expr)
     if ex.head != :block
         return (ex)
@@ -659,9 +667,10 @@ function process_multiline_logic(ex::Expr)
     return (e)
 end
 
-# The intent of this function is to "flatten" the parsing from 
-# Meta.parse with respect to the "XOR" operator.
-# The function is overloaded for three types: Int, Symbol, and Expr.
+#= The intent of this function is to "flatten" the parsing from 
+   Meta.parse with respect to the "XOR" operator.
+   The function is overloaded for three types: Int, Symbol, and Expr.
+=#
 function fixXorParseTree(s::Int, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
@@ -695,9 +704,10 @@ function fixXorParseTree(e::Expr, cnt=1; verbose=false)
     return (Expr(:call, e.args[1], map(x -> fixXorParseTree(x, cnt + 1; verbose=verbose), e.args[2:end])...))
 end
 
-# The intent of this function is to replace the logic implication operator
-# with its equivalent in terms of NOT and OR: x1 => x2 == ~x1 + x2.
-# Again, the function is overloaded for three types: Int, Symbol, and Expr.
+#= The intent of this function is to replace the logic implication operator
+   with its equivalent in terms of NOT and OR: x1 => x2 == ~x1 + x2.
+   Again, the function is overloaded for three types: Int, Symbol, and Expr.
+=#
 function fixImpParseTree(s::Int, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
@@ -726,10 +736,11 @@ function fixImpParseTree(e::Expr, cnt=1; verbose=false)
 end
 
 
-# The intent of this function is to replace the logic equivalence operator, ⟺ ,
-# with its equivalent in terms of more basic logical operators.
-# Again, the function is overloaded for three types: Int, Symbol, and Expr.
-# At the leaves of the tree: constants and symbols, we return them unchanged.
+#= The intent of this function is to replace the logic equivalence operator, ⟺ ,
+   with its equivalent in terms of more basic logical operators.
+   Again, the function is overloaded for three types: Int, Symbol, and Expr.
+   At the leaves of the tree: constants and symbols, we return them unchanged.
+=#
 function fixIffParseTree(s::Int, cnt=1; verbose=false)
     delim = join(fill("  ", cnt))
     verbose && println("$(delim)Symbol: $s")
@@ -744,9 +755,10 @@ function fixIffParseTree(s::Symbol, cnt=1; verbose=false)
 end
 
 
-# For any expression where the operator is used, we 
-# repace ot in terms of xor and not:
-# x1 ⟺  x2 is the same as: ~x1 ⊕ x2.
+#= For any expression where the operator is used, we 
+   repace ot in terms of xor and not:
+   x1 ⟺  x2 is the same as: ~x1 ⊕ x2.
+=#
 function fixIffParseTree(e::Expr, cnt=1; verbose=false)
     N = length(e.args)
     delim = join(fill("  ", cnt))
@@ -1046,9 +1058,10 @@ function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
     #      value of the simple booleans.
     if length(xargs) == 0
         return (sum(iargs) % 2)
-        # else if there is one complex boolean expression, return the 
-        # expression that is the xor of the resulting simple boolean XORS 
-        # with the complex boolean expression.
+        #= else if there is one complex boolean expression, return the 
+           expression that is the xor of the resulting simple boolean XORS 
+           with the complex boolean expression.
+		=#
     elseif length(xargs) == 1
         if (sum(iargs) % 2) == 1
             return (Expr(:call, :~, xargs[1]))
