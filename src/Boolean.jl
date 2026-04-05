@@ -11,6 +11,35 @@ export isEquiv, parseLogic, @bfunc, Blogic_from_file
 
 
 """
+    validate_single_variable(s)
+
+Check that a logic formula string uses only one base variable name.
+Returns the base variable name string.
+
+# Arguments
+- `s :: String` -- A logic formula string.
+
+# Return
+`::String` -- The base variable name.
+"""
+function validate_single_variable(s::String)
+    ar = []
+    for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
+        push!(ar, split(m.match, r"[0-9]+")[1])
+    end
+    ar = unique(ar)
+    if length(ar) > 1
+        error("Logic string uses more than one variable: ",
+            map(x -> String(x), ar))
+    end
+    if length(ar) == 0
+        error("Logic string contains no variables.")
+    end
+    return String(ar[1])
+end
+
+
+"""
 Define an operations type. Meant for the operator symbols:
 `:+`, `:*`, `:⊕`, `:~`, so that we may `dispatch` 
 on them as `types`.
@@ -92,25 +121,10 @@ Outer constructor for Blogic.
 function Blogic(s::String; simplify::Bool=false)
 
     s = replace(s, '\n' => ' ')
+    varname = validate_single_variable(s)
     value = eval(create_boolean_expr_tree(s; simplify=simplify))
 
-    #= Check that the variables used have the same name:
-       Looking for x1, x2, x3. Not x1, y2, z3.
-       Get the array of unique variables names.
-	=#
-    ar = []
-    for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
-        push!(ar, split(m.match, r"[0-9]+")[1])
-    end
-
-    # If there are more than one, error.
-    ar = unique(ar)
-    if length(ar) > 1
-        error("Logic string uses more than one variable: ",
-            map(x -> String(x), ar))
-    end
-
-    return (Blogic(s, String(ar[1]), value))
+    return (Blogic(s, varname, value))
 end
 
 
@@ -127,15 +141,13 @@ Outer constructor for Blogic.
 """
 function Blogic_from_file(f::String; simplify::Bool=false)
 
-    fh = nothing
-    try
-        fh = open(f)
+    s = try
+        open(f) do fh
+            read(fh, String)
+        end
     catch
         throw(DomainError(0, "Blogic: Unable to open file, \"$f\""))
     end
-
-    s = read(fh, String)
-    close(fh)
 
     return (Blogic(s; simplify=simplify))
 end
@@ -157,7 +169,7 @@ function (f::Blogic)(xs::Vararg{Int})
     global logic_size
 
     if length(xs) != logic_size
-        raise(DomainError("Blogic function: Input `xs` has the wrong number of variables."))
+        throw(DomainError(length(xs), "Blogic function: Input `xs` has the wrong number of variables."))
     end
     p = 1
     s = 0
@@ -186,7 +198,7 @@ function (f::Blogic)(xm::Matrix{Int})
 
     M, N = size(xm)
     if N != logic_size
-        raise(DomainError("Blogic function: Input `xm` has the wrong number of variables."))
+        throw(DomainError(N, "Blogic function: Input `xm` has the wrong number of variables."))
     end
 
     s = zeros(Int, M)
@@ -233,28 +245,14 @@ Bit vector = Bool[0, 0, 0, 0, 0, 1, 1, 1]
 function create_bool_rep(s::String, simplify=false)
     global logic_size
 
-    #= Check that the variables used have the same name:
-       Looking for x1, x2, x3. Not x1, y2, z3.
-       Get the array of unique variables names.
-	=#
-    ar = []
-    for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
-        push!(ar, split(m.match, r"[0-9]+")[1])
-    end
-
-    # If there are more than one, error.
-    ar = unique(ar)
-    if length(ar) > 1
-        error("Logic string uses more than one variable: ",
-            map(x -> String(x), ar))
-    end
+    varname = validate_single_variable(s)
     ns = parseLogic(s)
     if simplify
         val = eval(modifyLogicExpr!(simplifyLogic(ns)))
     else
         val = eval(modifyLogicExpr!(ns))
     end
-    Blogic(s, String(ar[1]), val)
+    Blogic(s, varname, val)
 end
 
 function create_boolean_expr_tree(s::String; simplify::Bool=false)
@@ -317,21 +315,7 @@ macro bfunc(x)
     sform = replace(sform, [r"^ *" => "", r" *$" => "", r" +" => "  "]...)
     num_vars = maximum([parse(Int, x) for x in split(sform, r"[ *+~⟺ ()⊕⟹ a-z]+") if x != ""])
 
-    #= Check that the variables used have the same name:
-       Looking for x1, x2, x3. Not x1, y2, z3.
-       Get the array of unique variables names.
-	=#
-    ar = []
-    for m in eachmatch(r"[a-zA-Z]+([0-9]+)", sform)
-        push!(ar, split(m.match, r"[0-9]+")[1])
-    end
-
-    # If there is more than one, error.
-    ar = unique(ar)
-    if length(ar) > 1
-        error("Logic string uses more than one variable: ",
-            map(x -> String(x), ar))
-    end
+    varname = validate_single_variable(sform)
 
     # Build bit-vector versions of `num_vars` logic variables.
     init_logic(num_vars)
@@ -341,7 +325,7 @@ macro bfunc(x)
        of the formula, the variable base name, and the expression tree
        which will be evaluated to a bit-vector -- our representation of the function.
 	=#
-    Expr(:call, :Blogic, sform, String(ar[1]), create_boolean_expr_tree(sform))
+    Expr(:call, :Blogic, sform, varname, create_boolean_expr_tree(sform))
 end
 
 
@@ -380,7 +364,7 @@ Determines if two logical functions are equivalent when represented as strings.
 
 """
 function isEquiv(f1::String, f2::String)
-    b = create_bool_rep("( " * f1 * ") ⊕ " * " ( " * f2 * " )")
+    b = create_bool_rep("( " * f1 * " ) ⊕ ( " * f2 * " )")
     lc = logicCount(b)
     return (lc == 0 ? true : false)
 end
@@ -563,8 +547,8 @@ of each of the variables collectively as a `BitArray`.
 `::BitArray` -- The bit representation of all of the logical variables.
 """
 function bool_var_rep(n::Signed)
-    if n > 30
-        error("Can't represent more than 30 variables.")
+    if n > 22
+        error("Can't represent more than 22 variables.")
     elseif n < 2
         error("Can't represent less than 2 variables.")
     else
@@ -634,37 +618,6 @@ function parseLogic(expr::String)
     # Lastly flatten XOR trees into a vector in the same was that
     # Meta.parse does for + and *.
     return (fixXorParseTree(e2))
-end
-
-#= Given a vector of expressions create that interleaves an expression with
-   a logic operator -- one of: +, *, xor, not, implies, is-equivalent,
-   create an new expression that is the "left associative" parse of this.
-   That is, treat all operators as left associative with equal precedence.
-=#
-function process_multiline_logic(ex::Expr)
-    if ex.head != :block
-        return (ex)
-    end
-
-    op_ary = []
-    arg_ary = []
-    for e in ex.args
-        if e in [:+, :*, :⊕, :⟹, :⟺]
-            push!(op_ary, e)
-        else
-            push!(arg_ary, e)
-        end
-    end
-    if length(op_ary) + 1 != length(arg_ary)
-        throw(DomainError(0, "Every other line should be an operator."))
-    end
-    reverse!(op_ary)
-    reverse!(arg_ary)
-    e = Expr(:call, pop!(op_ary), pop!(arg_ary), pop!(arg_ary))
-    while length(op_ary) > 0
-        e = Expr(:call, pop!(op_ary), e, pop!(arg_ary))
-    end
-    return (e)
 end
 
 #= The intent of this function is to "flatten" the parsing from 
@@ -791,6 +744,7 @@ representing values from `xs` and the number of their occurrences.
 
 """
 function rle(xs::Vector{T}) where {T}
+    isempty(xs) && return Tuple{T,Int}[]
     lastx = xs[1]
     rle = []
     cnt = 1
@@ -865,8 +819,9 @@ function modifyLogicExpr!(e::Symbol)
     global opMap
 
     # If this is a variable get the corresponding `BitVector`.
-    if match(r"[a-zA-Z]+", String(e)) !== nothing
-        vn = parse(Int, (split(String(e), r"[a-zA-Z]+"))[2])
+    m = match(r"^[a-zA-Z]+(\d+)$", String(e))
+    if m !== nothing
+        vn = parse(Int, m.captures[1])
         return (vars[:, vn])
     end
 
@@ -943,8 +898,7 @@ function simplifyLogic(e::Expr)
     end
     # If this has the form: `~ expr...`
     if length(e.args) == 2 && e.args[1] == :~
-        if typeof(e.args[2]) == Expr && length(e.args[2].args) == 2
-            e.args[2].args[1] == :~
+        if typeof(e.args[2]) == Expr && length(e.args[2].args) == 2 && e.args[2].args[1] == :~
             return (simplifyLogic(e.args[2].args[2]))
         end
         arg = simplifyLogic(e.args[2])
@@ -1046,12 +1000,14 @@ function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
     # If there are no simple booleans (0 or 1s), return the xor expression 
     #      with the xargs.
     if length(iargs) == 0
-        return (Expr(:call, :⊕, xargs...))
-        if xargs[1] isa Vector{Any}
-            return (Expr(xargs[1]...))
-        else
-            return (xargs[1])
+        if length(xargs) == 1
+            if xargs[1] isa Vector{Any}
+                return (Expr(xargs[1]...))
+            else
+                return (xargs[1])
+            end
         end
+        return (Expr(:call, :⊕, xargs...))
     end
 
     # If there are no complex boolean expressions, return the xor 
