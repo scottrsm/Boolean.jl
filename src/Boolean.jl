@@ -177,7 +177,7 @@ function (f::Blogic)(xs::Vararg{Int})
         s += x * p
         p *= 2
     end
-    return (f.val[s])
+    return (f.val[s + 1])
 end
 
 
@@ -208,7 +208,7 @@ function (f::Blogic)(xm::Matrix{Int})
         s += xm[:, i] .* p
         p *= 2
     end
-    return (f.val[s])
+    return (f.val[s .+ 1])
 end
 
 
