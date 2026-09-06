@@ -118,9 +118,8 @@ formula is the largest variable index it uses, or the minimum set with
 `Blogic(form::String, v::String, value::BitVector)`
 
 # Examples
-```jdoctest
+```jldoctest
 julia> Blogic("(z1 + z2) * z3", "z", BitVector([0, 0, 0, 0, 0, 1, 1, 1]))
-
 Formula    = (z1 + z2) * z3
 Variable   = z
 Size       = 3
@@ -292,9 +291,8 @@ This is done by the following procedure:
 - `nvars=0::Int` -- The minimum number of variables of the truth table (see `Blogic`).
 
 # Examples
-```jdoctest
+```jldoctest
 julia> create_bool_rep("(z1 + z2) * z3")
-
 Formula    = (z1 + z2) * z3
 Variable   = z
 Size       = 3
@@ -324,23 +322,21 @@ must be a parse-able expression. So, to connect complicated logic use
 binary operators on a line by themselves. See the example below.
 
 # Examples
-```jdoctest
+```jldoctest
 julia> @bfunc (z1 + z2) * z3
-
-Formula    = (z1 + z2) * z3
+Formula    = (z1  +  z2)  *  z3
 Variable   = z
 Size       = 3
 Bit vector = Bool[0, 0, 0, 0, 0, 1, 1, 1]
 ```
 
-```jdoctest
+```jldoctest
 julia> @bfunc begin
-   (z1 + z2) * z3
-   ⟹
-   z4 + z5
-   end
-
-Formula    = (z1 + z2) * z3 ⟹  z4 + z5
+       (z1 + z2) * z3
+       ⟹
+       z4 + z5
+       end
+Formula    = (z1  +  z2)  *  z3  ⟹  z4  +  z5
 Variable   = z
 Size       = 5
 Bit vector = Bool[1, 1, 1, 1, 1, 0, 0, 0, 1, 1  …  1, 1, 1, 1, 1, 1, 1, 1, 1, 1]

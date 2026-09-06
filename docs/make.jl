@@ -4,6 +4,8 @@ import Pkg
 Pkg.add("Documenter")
 using Documenter
 
+DocMeta.setdocmeta!(Boolean, :DocTestSetup, :(using Boolean); recursive=true)
+
 makedocs(
 	sitename = "Boolean",
 	format = Documenter.HTML(),
