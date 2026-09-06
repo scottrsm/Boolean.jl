@@ -31,11 +31,11 @@ Blogic
 ## Alternative `Blogic` Constructor
 
 ```@docs
-Blogic(s::String; simplify::Bool=false)
+Blogic(::AbstractString)
 ```
 
 ```@docs
-Blogic_from_file(f::String; simplify::Bool=false)
+Blogic_from_file
 ```
 
 ```@docs
@@ -48,15 +48,15 @@ create_bool_rep
 ```
 
 ```@docs
-(Blogic)(::Vararg{Int})
+(Blogic)(::Vararg{Integer})
 ```
 
 ```@docs
-(Blogic)(::Matrix{Int})
+(Blogic)(::AbstractMatrix{<:Integer})
 ```
 
 ```@docs
-isEquiv(f1::String, f2::String)
+isEquiv(::AbstractString, ::AbstractString)
 ```
 
 ```@docs
@@ -68,26 +68,6 @@ Used to show `Blogic` structures and compare Symbols with Expressions.
 
 ```@docs
 Base.show(::IO, ::Blogic)
-```
-
-```@docs
-Base.show(::IO, ::BitMatrix)
-```
-
-```@docs
-Base.isless(::Int, ::Symbol)
-```
-
-```@docs
-Base.isless(::Int, ::Expr)
-```
-
-```@docs
-Base.isless(::Symbol, ::Expr)
-```
-
-```@docs
-Base.isless(::Expr, ::Expr)
 ```
 
 ```@docs
@@ -135,6 +115,14 @@ rle
 
 ```@docs
 redux
+```
+
+```@docs
+evaluate_logic
+```
+
+```@docs
+validate_single_variable
 ```
 
 ## Index

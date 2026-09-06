@@ -1,13 +1,33 @@
 module Boolean
 
-global vars = nothing
-global logic_size = nothing
-global opMap = Dict(:* => :.&, :+ => :.|, :⊕ => :.⊻, :~ => :.~)
-
 import Base
 export Blogic, logicCount, nonZero, get_non_zero_inputs, bool_var_rep
 export init_logic, modifyLogicExpr!, simplifyLogic, create_bool_rep
 export isEquiv, parseLogic, @bfunc, Blogic_from_file
+
+
+#=-----------------------------------------------------------------
+----------  Module constants   ------------------------------------
+-------------------------------------------------------------------
+=#
+
+# The largest number of variables a truth table may have (2^22 rows).
+const MAX_VARS = 22
+
+# Map from the formula operators to the (broadcast) Julia operators used to evaluate them.
+const opMap = Dict(:* => :.&, :+ => :.|, :⊕ => :.⊻, :~ => :.~)
+
+# The operators that may appear in a (parsed) formula.
+const LOGIC_OPS = (:*, :+, :⊕, :~)
+
+# Regular expression matching a logic variable: a base name followed by an index.
+const VAR_RE = r"^([a-zA-Z]+)(\d+)$"
+
+#= The default minimum number of variables used for truth tables built from formulas
+   (see `init_logic`). A formula always uses at least as many variables as its
+   highest variable index.
+=#
+const DEFAULT_LOGIC_SIZE = Ref(0)
 
 
 """
@@ -22,20 +42,28 @@ Returns the base variable name string.
 # Return
 `::String` -- The base variable name.
 """
-function validate_single_variable(s::String)
-    ar = []
-    for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
-        push!(ar, split(m.match, r"[0-9]+")[1])
+function validate_single_variable(s::AbstractString)
+    ar = String[]
+    for m in eachmatch(r"([a-zA-Z]+)[0-9]+", s)
+        push!(ar, String(m.captures[1]))
     end
     ar = unique(ar)
     if length(ar) > 1
-        error("Logic string uses more than one variable: ",
-            map(x -> String(x), ar))
+        throw(ArgumentError("Logic string uses more than one variable: $(ar)"))
     end
     if length(ar) == 0
-        error("Logic string contains no variables.")
+        throw(ArgumentError("Logic string contains no variables."))
     end
-    return String(ar[1])
+    return ar[1]
+end
+
+# The highest variable index used in a logic formula string (0 if none).
+function max_var_index(s::AbstractString)
+    n = 0
+    for m in eachmatch(r"[a-zA-Z]+([0-9]+)", s)
+        n = max(n, parse(Int, m.captures[1]))
+    end
+    return n
 end
 
 
@@ -59,6 +87,9 @@ operators:
 - `⟹ ` -- The implication operator.
 - `⟺ ` -- The equivalence operator.
 
+along with variables (`x1`, `x2`, ...; any base name, one per formula),
+the constants `0` and `1`, and parentheses. Nothing else is accepted.
+
 The first 4 operators are left associative while the last two are right 
 associative. The operator precedence from highest to lowest is:
 - `~`
@@ -69,10 +100,17 @@ associative. The operator precedence from highest to lowest is:
 In practice, one uses a higher level constructor (`create_bool_rep`) 
 or uses the macro @bfunc. Both of which, in turn, use the inner constructor.
 
+A `Blogic` is self contained: its truth table is stored in `val`, whose
+length is ``2^{\\rm size}``. Row `i` of the truth table (entry `val[i]`) is the
+value of the formula for the inputs given by the bits of `i - 1`
+(variable 1 is the least significant bit). The number of variables of a
+formula is the largest variable index it uses, or the minimum set with
+`init_logic`, whichever is larger.
+
 # Fields
 - `formula :: String`    -- The string representation of the formula.
 - `var     :: String`    -- The base name of the logical variables.
-- `size    :: Int`       -- The number of variables in the formula.
+- `size    :: Int`       -- The number of variables of the truth table.
 - `val     :: BitVector` -- The bit vector representing the formula. 
                             It essentially expresses the values of all 
 							possible inputs.  
@@ -99,82 +137,104 @@ struct Blogic
     val::BitVector
 
     # Inner Constructor
-    Blogic(form::String, v::String, value::BitVector) =
-        new(form, v, Int(log2(length(value))), value)
+    function Blogic(form::String, v::String, value::BitVector)
+        n = length(value)
+        (n > 0 && ispow2(n)) || throw(ArgumentError("Blogic: The truth table must have a length that is a power of 2; got $n."))
+        return new(form, v, trailing_zeros(n), value)
+    end
+end
+
+
+# Clean up a formula string: newlines become spaces, surrounding white space is removed.
+clean_formula(s::AbstractString) = strip(replace(s, '\n' => ' ', '\r' => ' '))
+
+# The number of variables to use for a formula string.
+function formula_size(s::AbstractString, nvars::Int)
+    n = max(max_var_index(s), nvars, DEFAULT_LOGIC_SIZE[])
+    1 <= n <= MAX_VARS || throw(DomainError(n, "Blogic: The number of variables must be in the range [1, $MAX_VARS]."))
+    return n
 end
 
 
 """
-	Blogic(s[; simplify])
+	Blogic(s[; simplify=false, nvars=0])
 
 Outer constructor for Blogic.
 
 # Arguments
 - `s :: String`  -- A logic formula string.
 
-# Optional Arguments
-- `simplify=false::Bool` - Bool argument, if `true`, logic should be simplified.
+# Keyword Arguments
+- `simplify=false::Bool` -- If `true`, the logic is simplified before evaluation.
+- `nvars=0::Int` -- The minimum number of variables of the truth table. The number of
+                    variables used is the largest of `nvars`, the highest variable index in
+                    the formula, and the value set with `init_logic`.
 
 # Return
 `::Blogic`
 """
-function Blogic(s::String; simplify::Bool=false)
-
-    s = replace(s, '\n' => ' ')
+function Blogic(s::AbstractString; simplify::Bool=false, nvars::Int=0)
+    s = String(clean_formula(s))
     varname = validate_single_variable(s)
-    value = eval(create_boolean_expr_tree(s; simplify=simplify))
+    n = formula_size(s, nvars)
+    e = parseLogic(s)
+    simplify && (e = simplifyLogic(e))
+    value = evaluate_logic(e, n)
 
     return (Blogic(s, varname, value))
 end
 
 
 """
-	Blogic_from_file(f[; simplify])
+	Blogic_from_file(f[; simplify=false, nvars=0])
 
 Outer constructor for Blogic.
 
 # Arguments
 - `f :: String`  -- A string representing a utf-8 text file containing a logic formula.
 
+# Keyword Arguments
+- `simplify=false::Bool` -- If `true`, the logic is simplified before evaluation.
+- `nvars=0::Int` -- The minimum number of variables of the truth table (see `Blogic`).
+
 # Return
 `::Blogic`
 """
-function Blogic_from_file(f::String; simplify::Bool=false)
+function Blogic_from_file(f::AbstractString; simplify::Bool=false, nvars::Int=0)
+    isfile(f) || throw(ArgumentError("Blogic_from_file: Unable to open file, \"$f\""))
+    s = read(f, String)
 
-    s = try
-        open(f) do fh
-            read(fh, String)
-        end
-    catch
-        throw(DomainError(0, "Blogic: Unable to open file, \"$f\""))
-    end
-
-    return (Blogic(s; simplify=simplify))
+    return (Blogic(s; simplify=simplify, nvars=nvars))
 end
 
 
+# Check that the inputs of a `Blogic` function are boolean (0/1) values.
+function check_bool_inputs(xs)
+    all(x -> x == 0 || x == 1, xs) || throw(DomainError(xs, "Blogic function: Inputs must be 0 or 1."))
+    return nothing
+end
+
 """
-	(Blogic)(xs::Vararg{Int})
+	(Blogic)(xs::Vararg{Integer})
 
 Uses the structure `Blogic` as a `Boolean` function. 
 
 # Arguments
-- `xm :: Vararg{Int}`  -- A Varargs structure representing inputs to the
-                           `Blogic` function, `f`.
+- `xs :: Vararg{Integer}`  -- A Varargs structure representing inputs (`0`/`1` or `Bool`) to the
+                              `Blogic` function, `f`; one per variable of `f`.
 
 # Return
 `::Bool`
 """
-function (f::Blogic)(xs::Vararg{Int})
-    global logic_size
-
-    if length(xs) != logic_size
-        throw(DomainError(length(xs), "Blogic function: Input `xs` has the wrong number of variables."))
+function (f::Blogic)(xs::Vararg{Integer})
+    if length(xs) != f.size
+        throw(DomainError(length(xs), "Blogic function: Input `xs` has the wrong number of variables (expected $(f.size))."))
     end
+    check_bool_inputs(xs)
     p = 1
     s = 0
     for x in xs
-        s += x * p
+        s += Int(x) * p
         p *= 2
     end
     return (f.val[s + 1])
@@ -182,30 +242,29 @@ end
 
 
 """
-	(Blogic)(xm::Matrix{Int})
+	(Blogic)(xm::AbstractMatrix{<:Integer})
 
 Uses the structure `Blogic` as a `Boolean` function. 
 
 # Arguments
-- `xm :: Matrix{Int}`  -- A matrix of size `M`, `N` representing `M` sets of inputs
-                            to the function, `f`, which takes `N` variables.
+- `xm :: AbstractMatrix{<:Integer}`  -- A matrix of size `M`, `N` representing `M` sets of inputs
+                                        (`0`/`1` or `Bool`) to the function, `f`, which takes `N` variables.
 
 # Return
 `::BitVector` of length `M`.
 """
-function (f::Blogic)(xm::Matrix{Int})
-    global logic_size
-
+function (f::Blogic)(xm::AbstractMatrix{<:Integer})
     M, N = size(xm)
-    if N != logic_size
-        throw(DomainError(N, "Blogic function: Input `xm` has the wrong number of variables."))
+    if N != f.size
+        throw(DomainError(N, "Blogic function: Input `xm` has the wrong number of variables (expected $(f.size))."))
     end
+    check_bool_inputs(xm)
 
     s = zeros(Int, M)
     p = 1
 
-    for i in 1:N
-        s += xm[:, i] .* p
+    for j in 1:N
+        @views s .+= xm[:, j] .* p
         p *= 2
     end
     return (f.val[s .+ 1])
@@ -213,7 +272,7 @@ end
 
 
 """
-    create_bool_rep(s, simplify=false)
+    create_bool_rep(s; simplify=false, nvars=0)
 
 Turn boolean formula into a `BitVector` representation, `Blogic`.
 
@@ -221,14 +280,17 @@ This is done by the following procedure:
 - Determine the underlying base variable used in the formula.
 - Parse the formula into an expression, `Expr`.
 - Optionally simplify the logical expression.
-- Walk the expression tree creating a new tree with Julia 
-    mathematical operators substituted for user operators.
-- Evaluate the expression to create a `BitVector`.
+- Walk the expression tree evaluating it over the `BitVector`
+    representations of the variables to create the truth table `BitVector`.
 
 # Arguments 
 - `s :: String`      -- A logical string.
+
+# Keyword Arguments
 - `simplify=false :: Bool` -- If `true` simplify the logical expression before 
                         creating the `BitVector`.
+- `nvars=0::Int` -- The minimum number of variables of the truth table (see `Blogic`).
+
 # Examples
 ```jdoctest
 julia> create_bool_rep("(z1 + z2) * z3")
@@ -242,28 +304,8 @@ Bit vector = Bool[0, 0, 0, 0, 0, 1, 1, 1]
 # Return
 `::Blogic` -- Type representing the logical expression.
 """
-function create_bool_rep(s::String, simplify=false)
-    global logic_size
+create_bool_rep(s::AbstractString; simplify::Bool=false, nvars::Int=0) = Blogic(s; simplify=simplify, nvars=nvars)
 
-    varname = validate_single_variable(s)
-    ns = parseLogic(s)
-    if simplify
-        val = eval(modifyLogicExpr!(simplifyLogic(ns)))
-    else
-        val = eval(modifyLogicExpr!(ns))
-    end
-    Blogic(s, varname, val)
-end
-
-function create_boolean_expr_tree(s::String; simplify::Bool=false)
-    ns = parseLogic(s)
-    if simplify
-        val = modifyLogicExpr!(simplifyLogic(ns))
-    else
-        val = modifyLogicExpr!(ns)
-    end
-    return (val)
-end
 
 #-------------------------------------------------------------------
 #----------   The Main Function Interface  -------------------------
@@ -274,10 +316,9 @@ end
 	@bfunc(x)
 
 A macro to create a `Blogic` function in a syntactically clean way.
-This macro determes if an input expression is a valid formula
-and creates the associated "truth table" BitVectors based on the number of variables
-in the formula. The function that does this is `init_logic` which modifies
-**global variables**.
+This macro determines if an input expression is a valid formula
+and creates the associated "truth table" BitVector based on the number of variables
+in the formula (see `Blogic`).
 Multi-line formulas are entered using a begin/end block. However, each line 
 must be a parse-able expression. So, to connect complicated logic use
 binary operators on a line by themselves. See the example below.
@@ -313,19 +354,13 @@ macro bfunc(x)
         r" *⊕ *" => " ⊕ ", r" *⟺  *" => " ⟺  "]...)
 
     sform = replace(sform, [r"^ *" => "", r" *$" => "", r" +" => "  "]...)
-    num_vars = maximum([parse(Int, x) for x in split(sform, r"[ *+~⟺ ()⊕⟹ a-z]+") if x != ""])
 
-    varname = validate_single_variable(sform)
+    # Validate at macro expansion time (so a bad formula is a load-time error),
+    # but build the `Blogic` at run time: no global state is touched.
+    validate_single_variable(sform)
+    parseLogic(sform)
 
-    # Build bit-vector versions of `num_vars` logic variables.
-    init_logic(num_vars)
-
-
-    #= Create the call to Blogic inner constructor which will take the string form
-       of the formula, the variable base name, and the expression tree
-       which will be evaluated to a bit-vector -- our representation of the function.
-	=#
-    Expr(:call, :Blogic, sform, varname, create_boolean_expr_tree(sform))
+    return :(Blogic($sform))
 end
 
 
@@ -333,6 +368,7 @@ end
     isEquiv(f1::Blogic, f2::Blogic)
 
 Determines if two logical functions are equivalent when represented as `Blogic` structures.
+Functions with different numbers of variables are compared over the larger set of variables.
 
 # Arguments
 - `f1 :: Blogic` -- Formula 1.
@@ -343,10 +379,17 @@ Determines if two logical functions are equivalent when represented as `Blogic` 
 
 """
 function isEquiv(f1::Blogic, f2::Blogic)
-    sform = "( " * f1.formula * " ) ⊕ ( " * f2.formula * " )"
-    b = create_bool_rep(sform)
-    lc = logicCount(b)
-    return (lc == 0 ? true : false)
+    n = max(f1.size, f2.size)
+    return extend_truth_table(f1.val, f1.size, n) == extend_truth_table(f2.val, f2.size, n)
+end
+
+#= The truth table of a formula of `n` variables, viewed as a formula of `m >= n` variables:
+   the extra (higher) variables do not affect the value, and since variable 1 is the
+   least significant bit, the table simply repeats.
+=#
+function extend_truth_table(val::BitVector, n::Int, m::Int)
+    m >= n || throw(DomainError(m, "Cannot shrink a truth table of $n variables to $m variables."))
+    return m == n ? val : repeat(val, 2^(m - n))
 end
 
 
@@ -363,96 +406,34 @@ Determines if two logical functions are equivalent when represented as strings.
 `::Bool` -- `true` if the formulas are equivalent; `false` otherwise.
 
 """
-function isEquiv(f1::String, f2::String)
-    b = create_bool_rep("( " * f1 * " ) ⊕ ( " * f2 * " )")
-    lc = logicCount(b)
-    return (lc == 0 ? true : false)
+function isEquiv(f1::AbstractString, f2::AbstractString)
+    return isEquiv(Blogic(f1), Blogic(f2))
 end
 
 
 
 #=-----------------------------------------------------------------
-----------  Overload Base functions: show, isless, ==    ----------
+----------  Overload Base functions: show, ==, hash      ----------
 -------------------------------------------------------------------
 =#
 
 """
-    Show the Blogic structure.
-    Params:
-    io: IO handle.
-    x : Blogic structure.
+    Base.show(io::IO, x::Blogic)
+
+Show a `Blogic` structure: the compact form is `Blogic("formula")`; the
+`text/plain` form (used by the REPL) lists the formula, variable, size, and bit vector.
 """
-function Base.show(io::IO, x::Blogic)
+Base.show(io::IO, x::Blogic) = print(io, "Blogic(", repr(x.formula), ")")
+
+function Base.show(io::IO, ::MIME"text/plain", x::Blogic)
     println(io, "Formula    = ", x.formula)
     println(io, "Variable   = ", x.var)
     println(io, "Size       = ", x.size)
-    println(io, "Bit vector = ", x.val)
+    print(io,   "Bit vector = ", x.val)
 end
 
 
-"""
-    Show a BitMatrix.
-"""
-function Base.show(io::IO, z::BitMatrix)
-    n, _ = size(z)
-    if n == 0
-        println("N/A")
-    else
-        for i in 1:n
-            println(io, Tuple(map(x -> Int(x), z[i, :])))
-        end
-    end
-end
-
-
-# Define how to order Int, Symbols, and Expr.
-# Needed for `simplifyLogic`.
-"""
-	Base.isless(i1::Int, s2::Symbol)
-
-Compare an `Int` with a `Symbol`.
-"""
-Base.isless(x::Int, y::Symbol) = true
-Base.isless(x::Symbol, y::Int) = false
-
-"""
-	Base.isless(i1::Int, e2::Expr)
-
-Compare an `Int` with an `Expr`.
-"""
-Base.isless(x::Int, y::Expr) = true
-Base.isless(x::Expr, y::Int) = false
-
-"""
-	Base.isless(s1::Symbol, e2::Expr)
-
-Compare an `Symbol` with an `Expr`.
-"""
-Base.isless(x::Symbol, y::Expr) = true
-Base.isless(x::Expr, y::Symbol) = false
-
-"""
-	Base.isless(e1::Expr, e2::Expr)
-
-Compare two Julia `Expr` expressions.
-"""
-function Base.isless(e1::Expr, e2::Expr)
-    args1 = e1.args
-    args2 = e2.args
-    args1[1] < args2[1] && return (true)
-    args1[1] > args2[1] && return (false)
-    n1 = length(args1[2:end])
-    n2 = length(args2[2:end])
-    n1 < n2 && return (true)
-    n1 > n2 && return (false)
-    for i in 1:n1
-        Base.isless(args1[1+i], args2[1+i]) && return (true)
-    end
-    return (false)
-end
-
-
-# Define equality for type `Blogic`.
+# Define equality (and a matching hash) for type `Blogic`.
 """
 	Base.:(==)
 
@@ -464,6 +445,8 @@ function Base.:(==)(b1::Blogic, b2::Blogic)
         (b1.size == b2.size) &&
         (b1.val == b2.val)
 end
+
+Base.hash(b::Blogic, h::UInt) = hash(b.val, hash(b.size, hash(b.var, hash(b.formula, hash(:Blogic, h)))))
 
 
 #=-----------------------------------------------------------------
@@ -487,30 +470,30 @@ logicCount(f::Blogic) = count(f.val)
 
 
 """
-    nonZero(f, head=1)
+    nonZero(f; head=1)
 
 Get up to `head` inputs that generate true values for a logic function, `f`.
 
 # Arguments
 - `f :: Blogic` -- A logic formula.
 
-# Optional Arguments
+# Keyword Arguments
 - `head=1 :: Int`  -- The maximum number of inputs to consider.
     
 # Return
-A list of up to `head` input values that will give the 
-logic function, `f`, a value of `true`.
+`::Union{BitMatrix, Nothing}` -- A matrix whose rows are up to `head` input values
+(one column per variable) that will give the logic function, `f`, a value of `true`;
+`nothing` if there are none.
 """
-function nonZero(f::Blogic; head=1)
-    n = logicCount(f)
-    get_non_zero_inputs(f.val, f.size, num=min(n, head))
+function nonZero(f::Blogic; head::Int=1)
+    get_non_zero_inputs(f.val, f.size, num=head)
 end
 
 
 """
 	get_non_zero_inputs(v, n[; num=1])
 
-Get `num` inputs that generate true values for a logic function.
+Get up to `num` inputs that generate true values for a logic function.
 `v` is a boolean vector that indicates which elements of the truth table
 yield a value of `true`.
 
@@ -518,16 +501,20 @@ yield a value of `true`.
 - `v   :: BitVector` -- A bit vector representing `true` and `false` values.
 - `n   :: Int`     -- Describes the length of the truth table column: ``2^n``.
 
-# Optional Arguments
-- `num :: Int`     -- The desired number of inputs that generate truth values.
+# Keyword Arguments
+- `num :: Int`     -- The desired (maximum) number of inputs that generate truth values.
 
-# Returns
-`::Union{BitMatrix, Nothing}` -- Input values that generate truth values for the current function.
+# Return
+`::Union{BitMatrix, Nothing}` -- Input values (one row per input, one column per variable)
+that generate truth values for the function; `nothing` if there are none.
 """
 function get_non_zero_inputs(v::BitVector, n::Int; num::Int=1)
-    idx = collect(1:2^n)[v]
+    length(v) == 2^n || throw(DimensionMismatch("get_non_zero_inputs: The bit vector has length $(length(v)); expected 2^$n."))
+    num >= 0 || throw(DomainError(num, "get_non_zero_inputs: `num` must be non-negative."))
+    idx = findall(v)
     length(idx) == 0 && return (nothing)
-    return (vars[idx[1:num], :])
+    idx = idx[1:min(num, length(idx))]
+    return (BitMatrix([((i - 1) >> (j - 1)) & 1 == 1 for i in idx, j in 1:n]))
 end
 
 
@@ -541,45 +528,42 @@ Essentially, generate the truth table
 of each of the variables collectively as a `BitArray`.
 
 # Arguments
-- `n : Number` of logical variables.
+- `n : Number` of logical variables (`1 <= n <= 22`).
 
 # Return
-`::BitArray` -- The bit representation of all of the logical variables.
+`::BitMatrix` -- The bit representation of all of the logical variables:
+a matrix of shape `(2^n, n)`, where column `j` represents variable `j`.
 """
-function bool_var_rep(n::Signed)
-    if n > 22
-        error("Can't represent more than 22 variables.")
-    elseif n < 2
-        error("Can't represent less than 2 variables.")
-    else
-        let nn = Unsigned(n)
-            #= `BitArray([div(i-1, 2^(j-1)) % 2 != 0  for i in 1:2^n, j in 1:n])`
-               This is a bit matrix of shape (2^n, n), where column 1 
-               represents `x1`, column 2 represents `x2`, etc.
-			=#
-            BitArray([((i - 1) >> (j - 1)) & 1 for i in 1:2^nn, j in 1:nn])
-        end
-    end
+function bool_var_rep(n::Integer)
+    1 <= n <= MAX_VARS || throw(DomainError(n, "Can't represent less than 1 or more than $MAX_VARS variables."))
+    return BitMatrix([((i - 1) >> (j - 1)) & 1 == 1 for i in 1:2^n, j in 1:n])
+end
+
+# The truth table column of variable `j` out of `n` (column `j` of `bool_var_rep(n)`).
+function bool_var_column(n::Int, j::Int)
+    1 <= j <= n || throw(DomainError(j, "Variable index $j is not in the range [1, $n]."))
+    return BitVector([((i - 1) >> (j - 1)) & 1 == 1 for i in 1:2^n])
 end
 
 
 """
-    init_logic
+    init_logic(n)
 
-This sets two global variables, the size of the boolean vectors and 
-the other the `Bitarray` representations of the variables.
+Sets the minimum number of variables, `n`, used for the truth tables of formulas
+built from strings or with `@bfunc` (a formula always uses at least as many
+variables as its highest variable index). By default there is no minimum.
 
 # Arguments
-- `n :: Int` -- The number of boolean variables used in the formulas
-this module will consider.
+- `n :: Int` -- The minimum number of boolean variables used for formulas (`0 <= n <= 22`).
 
 # Return
 Nothing
 
 """
-function init_logic(n::Signed)
-    global vars = bool_var_rep(n)
-    global logic_size = n
+function init_logic(n::Integer)
+    0 <= n <= MAX_VARS || throw(DomainError(n, "init_logic: `n` must be in the range [0, $MAX_VARS]."))
+    DEFAULT_LOGIC_SIZE[] = Int(n)
+    return nothing
 end
 
 
@@ -598,16 +582,21 @@ We also handle the implication operator and logical equivalence
 operator, by replacing them with their equivalents in terms
 of ~, +, or *.
 
+The resulting tree is validated: only the operators `~`, `*`, `+`, `⊕`,
+variables of the form `r"[a-zA-Z]+[0-9]+"`, and the constants `0` and `1`
+may appear; anything else raises an `ArgumentError`.
+
 # Arguments
 - `expr::String` -- A logic formula
 
 # Return
 A parse tree with variable string names replaced with symbols.
 """
-function parseLogic(expr::String)
+function parseLogic(expr::AbstractString)
 
     # Get a parsing with Meta.parse.
-    e0 = Meta.parse(expr)
+    e0 = Meta.parse(String(expr))
+    e0 isa Expr && e0.head == :incomplete && throw(ArgumentError("parseLogic: Incomplete logic formula: $(repr(expr))"))
 
     # Replace logical equivalence operators with the implication operator.
     e1 = fixIffParseTree(e0)
@@ -615,77 +604,68 @@ function parseLogic(expr::String)
     # Replace implication operators with *, +, and ~.
     e2 = fixImpParseTree(e1)
 
-    # Lastly flatten XOR trees into a vector in the same was that
+    # Lastly flatten XOR trees into a vector in the same way that
     # Meta.parse does for + and *.
-    return (fixXorParseTree(e2))
+    e3 = fixXorParseTree(e2)
+
+    # Make sure the tree is a pure logic formula.
+    validate_logic_tree(e3)
+    return e3
+end
+
+# Validate a parsed logic tree: operators, variables, and the constants 0/1 only.
+validate_logic_tree(e::Symbol) = (match(VAR_RE, String(e)) === nothing && throw(ArgumentError("parseLogic: Invalid variable name: $e")); nothing)
+validate_logic_tree(e::Integer) = ((e == 0 || e == 1) || throw(ArgumentError("parseLogic: Invalid constant: $e (only 0 and 1 are allowed)")); nothing)
+validate_logic_tree(e) = throw(ArgumentError("parseLogic: Invalid element in logic formula: $(repr(e))"))
+function validate_logic_tree(e::Expr)
+    e.head == :call || throw(ArgumentError("parseLogic: Invalid expression in logic formula: $e"))
+    op = e.args[1]
+    op in LOGIC_OPS || throw(ArgumentError("parseLogic: Invalid operator in logic formula: $op"))
+    if op == :~
+        length(e.args) == 2 || throw(ArgumentError("parseLogic: `~` takes exactly one argument: $e"))
+    else
+        length(e.args) >= 3 || throw(ArgumentError("parseLogic: `$op` needs at least two arguments: $e"))
+    end
+    for a in e.args[2:end]
+        validate_logic_tree(a)
+    end
+    return nothing
 end
 
 #= The intent of this function is to "flatten" the parsing from 
    Meta.parse with respect to the "XOR" operator.
    The function is overloaded for three types: Int, Symbol, and Expr.
 =#
-function fixXorParseTree(s::Int, cnt=1; verbose=false)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Symbol: $s")
-    return (s)
-end
+fixXorParseTree(s) = s
 
-
-function fixXorParseTree(s::Symbol, cnt=1; verbose=false)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Symbol: $s")
-    return (s)
-end
-
-
-function fixXorParseTree(e::Expr, cnt=1; verbose=false)
-    N = length(e.args)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Expr: $e")
-
-    if e.args[1] == :⊕
-        nargs2 = fixXorParseTree(e.args[2], cnt + 1; verbose=verbose)
-        nargs3 = fixXorParseTree(e.args[3], cnt + 1; verbose=verbose)
-        if typeof(nargs2) == Expr && nargs2.args[1] == :⊕
-            nargs2 = deepcopy(nargs2.args[2:end])
+function fixXorParseTree(e::Expr)
+    if e.head == :call && e.args[1] == :⊕
+        nargs2 = fixXorParseTree(e.args[2])
+        nargs3 = fixXorParseTree(e.args[3])
+        if nargs2 isa Expr && nargs2.args[1] == :⊕
+            nargs2 = nargs2.args[2:end]
         end
-        if typeof(nargs3) == Expr && nargs3.args[1] == :⊕
-            nargs3 = deepcopy(nargs3.args[2:end])
+        if nargs3 isa Expr && nargs3.args[1] == :⊕
+            nargs3 = nargs3.args[2:end]
         end
         return (Expr(:call, :⊕, [nargs2; nargs3]...))
     end
-    return (Expr(:call, e.args[1], map(x -> fixXorParseTree(x, cnt + 1; verbose=verbose), e.args[2:end])...))
+    return (Expr(e.head, map(fixXorParseTree, e.args)...))
 end
 
 #= The intent of this function is to replace the logic implication operator
    with its equivalent in terms of NOT and OR: x1 => x2 == ~x1 + x2.
    Again, the function is overloaded for three types: Int, Symbol, and Expr.
 =#
-function fixImpParseTree(s::Int, cnt=1; verbose=false)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Symbol: $s")
-    return (s)
-end
+fixImpParseTree(s) = s
 
-
-function fixImpParseTree(s::Symbol, cnt=1; verbose=false)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Symbol: $s")
-    return (s)
-end
-
-
-function fixImpParseTree(e::Expr, cnt=1; verbose=false)
-    N = length(e.args)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Expr: $e")
-
-    if e.args[1] == :⟹
+function fixImpParseTree(e::Expr)
+    if e.head == :call && e.args[1] == :⟹
         nargs2 = Expr(:call, :~, fixImpParseTree(e.args[2]))
-        nargs3 = fixImpParseTree(e.args[3], cnt + 1; verbose=verbose)
-        return (Expr(:call, :+, [nargs2; nargs3]...))
+        nargs3 = fixImpParseTree(e.args[3])
+        return (Expr(:call, :+, nargs2, nargs3))
     end
-    return (Expr(:call, e.args[1], map(x -> fixImpParseTree(x, cnt + 1; verbose=verbose), e.args[2:end])...))
+    return (Expr(e.head, map(fixImpParseTree, e.args)...))
 end
 
 
@@ -693,37 +673,130 @@ end
    with its equivalent in terms of more basic logical operators.
    Again, the function is overloaded for three types: Int, Symbol, and Expr.
    At the leaves of the tree: constants and symbols, we return them unchanged.
-=#
-function fixIffParseTree(s::Int, cnt=1; verbose=false)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Symbol: $s")
-    return (s)
-end
-
-
-function fixIffParseTree(s::Symbol, cnt=1; verbose=false)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Symbol: $s")
-    return (s)
-end
-
-
-#= For any expression where the operator is used, we 
-   repace ot in terms of xor and not:
+   For any expression where the operator is used, we 
+   replace it in terms of xor and not:
    x1 ⟺  x2 is the same as: ~x1 ⊕ x2.
 =#
-function fixIffParseTree(e::Expr, cnt=1; verbose=false)
-    N = length(e.args)
-    delim = join(fill("  ", cnt))
-    verbose && println("$(delim)Expr: $e")
+fixIffParseTree(s) = s
 
-    if e.args[1] == :⟺
-        nargs2 = fixIffParseTree(e.args[2], cnt + 1; verbose=verbose)
-        nargs3 = fixIffParseTree(e.args[3], cnt + 1; verbose=verbose)
-        exp = Expr(:call, :⊕, Expr(:call, :~, nargs2), nargs3)
-        return (exp)
+function fixIffParseTree(e::Expr)
+    if e.head == :call && e.args[1] == :⟺
+        nargs2 = fixIffParseTree(e.args[2])
+        nargs3 = fixIffParseTree(e.args[3])
+        return Expr(:call, :⊕, Expr(:call, :~, nargs2), nargs3)
     end
-    return (Expr(:call, e.args[1], map(x -> fixIffParseTree(x, cnt + 1; verbose=verbose), e.args[2:end])...))
+    return (Expr(e.head, map(fixIffParseTree, e.args)...))
+end
+
+
+#=-----------------------------------------------------------------
+----------  Evaluation of a logic tree   --------------------------
+-------------------------------------------------------------------
+=#
+
+"""
+    evaluate_logic(e, n)
+
+Evaluate a (parsed) logic expression tree over the truth tables of `n` variables,
+producing the truth table (a `BitVector` of length ``2^n``) of the formula.
+Constants evaluate to all-false / all-true vectors.
+"""
+evaluate_logic(e::Integer, n::Int) = (validate_logic_tree(e); e == 1 ? trues(2^n) : falses(2^n))
+
+function evaluate_logic(e::Symbol, n::Int)
+    validate_logic_tree(e)
+    m = match(VAR_RE, String(e))
+    return bool_var_column(n, parse(Int, m.captures[2]))
+end
+
+function evaluate_logic(e::Expr, n::Int)
+    validate_logic_tree(e)
+    op = e.args[1]
+    if op == :~
+        return .~evaluate_logic(e.args[2], n)
+    end
+    acc = evaluate_logic(e.args[2], n)
+    for a in e.args[3:end]
+        b = evaluate_logic(a, n)
+        if op == :*
+            acc = acc .& b
+        elseif op == :+
+            acc = acc .| b
+        else # :⊕
+            acc = acc .⊻ b
+        end
+    end
+    return acc
+end
+
+
+"""
+    modifyLogicExpr!(e[, n])
+
+Walk an expression tree, converting the logic operators to the (broadcast) Julia
+operators and variables into their `BitVector` truth table representations
+(for `n` variables; by default the highest variable index in the expression, or the
+minimum set with `init_logic`). The result is a Julia expression that evaluates
+to the truth table of the formula. (The package itself evaluates formulas
+directly, see `evaluate_logic`; this function is provided for inspection.)
+
+# Arguments
+- `e :: Expr` -- A (parsed) logic expression.
+
+# Return
+`::Expr` -- A Julia expression over `BitVector`s.
+"""
+function modifyLogicExpr!(e, n::Int=max(expr_max_var(e), DEFAULT_LOGIC_SIZE[]))
+    validate_logic_tree(e)
+    return _modify_logic_expr(e, n)
+end
+
+_modify_logic_expr(e::Integer, n::Int) = e == 1 ? trues(2^n) : falses(2^n)
+function _modify_logic_expr(e::Symbol, n::Int)
+    m = match(VAR_RE, String(e))
+    return bool_var_column(n, parse(Int, m.captures[2]))
+end
+function _modify_logic_expr(e::Expr, n::Int)
+    return Expr(:call, opMap[e.args[1]], map(a -> _modify_logic_expr(a, n), e.args[2:end])...)
+end
+
+# The highest variable index in a logic expression tree.
+expr_max_var(e::Integer) = 0
+expr_max_var(e::Symbol) = (m = match(VAR_RE, String(e)); m === nothing ? 0 : parse(Int, m.captures[2]))
+expr_max_var(e::Expr) = maximum(expr_max_var, e.args[2:end]; init=0)
+
+
+#=-----------------------------------------------------------------
+----------  Simplification of a logic tree   ----------------------
+-------------------------------------------------------------------
+=#
+
+#= A total order on the elements of a logic tree (Int < Symbol < Expr), used to
+   sort the arguments of commutative operators so that equal arguments are adjacent.
+   (A private order: `Base.isless` is not extended for `Int`/`Symbol`/`Expr`.)
+=#
+_rank(::Integer) = 0
+_rank(::Symbol) = 1
+_rank(::Expr) = 2
+_rank(::Any) = 3
+
+function expr_lt(a, b)
+    ra, rb = _rank(a), _rank(b)
+    ra != rb && return ra < rb
+    return _expr_lt_same(a, b)
+end
+_expr_lt_same(a::Integer, b::Integer) = a < b
+_expr_lt_same(a::Symbol, b::Symbol) = a < b
+_expr_lt_same(a, b) = false
+function _expr_lt_same(a::Expr, b::Expr)
+    a.args[1] != b.args[1] && return a.args[1] < b.args[1]
+    na, nb = length(a.args), length(b.args)
+    na != nb && return na < nb
+    for i in 2:na
+        expr_lt(a.args[i], b.args[i]) && return true
+        expr_lt(b.args[i], a.args[i]) && return false
+    end
+    return false
 end
 
 
@@ -744,9 +817,9 @@ representing values from `xs` and the number of their occurrences.
 
 """
 function rle(xs::Vector{T}) where {T}
-    isempty(xs) && return Tuple{T,Int}[]
+    rle = Tuple{T,Int}[]
+    isempty(xs) && return rle
     lastx = xs[1]
-    rle = []
     cnt = 1
     for x in xs[2:end]
         if x == lastx
@@ -760,75 +833,6 @@ function rle(xs::Vector{T}) where {T}
     push!(rle, (lastx, cnt))
     return (rle)
 end
-
-
-"""
-    modifyLogicExpr!(e)
-
-The default rule for modifying a logic expression is to do nothing.
-"""
-function modifyLogicExpr!(e::T) where {T}
-    return (e)
-end
-
-
-"""
-    modifyLogicExpr!(e::Expr)
-
-Walk an expression tree, converting variable names and operators
-to Julia operators and variables into `BitVector` representations.
-
-# Arguments
-- `e :: Expr` -- An expression.
-
-# Return
-`::Expr` -- A logic expression.
-"""
-function modifyLogicExpr!(e::Expr)
-    ary = []
-    for (_, arg) in enumerate(e.args)
-        push!(ary, modifyLogicExpr!(arg))
-    end
-    e.args = ary
-    return (e)
-end
-
-
-"""
-    modifyLogicExpr!(e::Symbol)
-
-If `e` is a Symbol, it should be a variable of the form `r"[a-zA-Z]+[0-9]+"`.
-
-The code splits the name off and uses the number to look up the 
-    `BitVector` representation.
-    Otherwise, it is assumed to be an operator symbol and it is then 
-    mapped to the appropriate Julia operator.
-
-  **NOTE:** This will work even if one makes a mistake and uses 
-            `x3`, or `y3`, the bit vector for the 
-            third "variable" will be used.
-
-# Arguments
-- `e :: Symbol` -- An variable or operator.
-
-# Return
-`::Expr` -- A logic expression.
-"""
-function modifyLogicExpr!(e::Symbol)
-    global vars
-    global opMap
-
-    # If this is a variable get the corresponding `BitVector`.
-    m = match(r"^[a-zA-Z]+(\d+)$", String(e))
-    if m !== nothing
-        vn = parse(Int, m.captures[1])
-        return (vars[:, vn])
-    end
-
-    # If this is an operator symbol, get the corresponding Julia operator.
-    return (get(opMap, e, e))
-end
-
 
 
 """
@@ -852,7 +856,7 @@ end
 
 
 """
-    redux(::Opt{:⊕}, pair::Tuple{Expr, Int})
+    redux(::Op{:⊕}, pair::Tuple{Expr, Int})
 
 Reduce a pair consisting of an expression and its count to just 
 an expression. 
@@ -861,7 +865,7 @@ For an XOR expression, we know that only the expression
 remains or the value is 0.
 
 # Arguments
-- `:::Opt{:⊕}`                 -- An operator type.
+- `:::Op{:⊕}`                  -- An operator type.
 - `pair :: Tuple{Expr, Int}` -- Expression and its count.
 
 # Return
@@ -888,21 +892,21 @@ to deal with different logical operators.
 - `e :: Expr` -- Logic expression.
 
 # Return
-`::Expr` -- Simplified logic expression.
+`::Expr` -- Simplified logic expression (an `Int` if it reduces to a constant, a `Symbol` if to a variable).
 
 """
 function simplifyLogic(e::Expr)
     if length(e.args) >= 3
         op = e.args[1]
-        return (simplifyLogic(Op{op}(), e.args[2:end]))
+        return (simplifyLogic(Op{op}(), Any[e.args[2:end]...]))
     end
     # If this has the form: `~ expr...`
     if length(e.args) == 2 && e.args[1] == :~
-        if typeof(e.args[2]) == Expr && length(e.args[2].args) == 2 && e.args[2].args[1] == :~
+        if e.args[2] isa Expr && length(e.args[2].args) == 2 && e.args[2].args[1] == :~
             return (simplifyLogic(e.args[2].args[2]))
         end
         arg = simplifyLogic(e.args[2])
-        if typeof(arg) == Int
+        if arg isa Integer
             return ((1 + arg) % 2)
         else
             return (Expr(:call, :~, arg))
@@ -912,23 +916,10 @@ function simplifyLogic(e::Expr)
     return (e)
 end
 
-
-"""
-    simplifyLogic(::Op{:~}, xargs::Any)
-
-`simplifyLogic` for the NOT operator.
-"""
-function simplifyLogic(::Op{:~}, xargs::Any)
-    xargs = map(arg -> simplifyLogic(arg), xargs)
-    xargs = map(x -> redux(Op{:~}(), x), rle(sort(xargs)))
-
-    if xargs == 1
-        return (0)
-    end
-    if xargs == 0
-        return (1)
-    end
-    return (Expr(:call, :~, xargs))
+# Simplify, sort, and merge repeated arguments of an n-ary operator.
+function _simplified_args(op::Symbol, xargs::Vector{Any})
+    xargs = Any[simplifyLogic(arg) for arg in xargs]
+    return Any[redux(Op{op}(), x) for x in rle(sort(xargs; lt=expr_lt))]
 end
 
 
@@ -938,8 +929,7 @@ end
 `simplifLogic` for the OR operator.
 """
 function simplifyLogic(::Op{:+}, xargs::Vector{Any})
-    xargs = map(arg -> simplifyLogic(arg), xargs)
-    xargs = map(x -> redux(Op{:+}(), x), rle(sort(xargs)))
+    xargs = _simplified_args(:+, xargs)
 
     if any(x -> x == 1, xargs)
         return (1)
@@ -948,11 +938,7 @@ function simplifyLogic(::Op{:+}, xargs::Vector{Any})
     if length(xargs) == 0
         return (0)
     elseif length(xargs) == 1
-        if xargs[1] isa Vector{Any}
-            return (Expr(xargs[1]...))
-        else
-            return (xargs[1])
-        end
+        return (xargs[1])
     else
         return (Expr(:call, :+, xargs...))
     end
@@ -965,8 +951,7 @@ end
 `simplifyLogic` for the AND operator.
 """
 function simplifyLogic(::Op{:*}, xargs::Vector{Any})
-    xargs = map(arg -> simplifyLogic(arg), xargs)
-    xargs = map(x -> redux(Op{:*}(), x), rle(sort(xargs)))
+    xargs = _simplified_args(:*, xargs)
 
     if any(x -> x == 0, xargs)
         return (0)
@@ -975,11 +960,7 @@ function simplifyLogic(::Op{:*}, xargs::Vector{Any})
     if length(xargs) == 0
         return (1)
     elseif length(xargs) == 1
-        if xargs[1] isa Vector{Any}
-            return (Expr(xargs[1]...))
-        else
-            return (xargs[1])
-        end
+        return (xargs[1])
     else
         return (Expr(:call, :*, xargs...))
     end
@@ -992,20 +973,15 @@ end
 `simplifyLogic` for the XOR operator.
 """
 function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
-    xargs = map(arg -> simplifyLogic(arg), xargs)
-    xargs = map(x -> redux(Op{:⊕}(), x), rle(sort(xargs)))
+    xargs = _simplified_args(:⊕, xargs)
 
-    iargs = filter(arg -> typeof(arg) == Int, xargs)
-    xargs = filter(arg -> typeof(arg) != Int, xargs)
+    iargs = filter(arg -> arg isa Integer, xargs)
+    xargs = filter(arg -> !(arg isa Integer), xargs)
     # If there are no simple booleans (0 or 1s), return the xor expression 
     #      with the xargs.
     if length(iargs) == 0
         if length(xargs) == 1
-            if xargs[1] isa Vector{Any}
-                return (Expr(xargs[1]...))
-            else
-                return (xargs[1])
-            end
+            return (xargs[1])
         end
         return (Expr(:call, :⊕, xargs...))
     end
@@ -1022,11 +998,7 @@ function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
         if (sum(iargs) % 2) == 1
             return (Expr(:call, :~, xargs[1]))
         else
-            if xargs[1] isa Vector{Any}
-                return (Expr(xargs[1]...))
-            else
-                return (xargs[1])
-            end
+            return (xargs[1])
         end
     end
 
@@ -1037,9 +1009,6 @@ function simplifyLogic(::Op{:⊕}, xargs::Vector{Any})
     else
         return (Expr(:call, :⊕, xargs...))
     end
-
-    # We should not make it here.
-    throw(DomainError(0, "Method,simplifyLogic failed."))
 end
 
 
@@ -1048,7 +1017,7 @@ end
 
 `simplifyLogic` for the irreducible cases: A number or a symbol.
 """
-function simplifyLogic(e::Union{Int,Symbol})
+function simplifyLogic(e::Union{Integer,Symbol})
     return e
 end
 
